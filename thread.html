@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>６ちゃんねる - スレッド詳細</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 10px;
+      background: #f0f0f0;
+      max-width: 700px;
+      margin: auto;
+    }
+    #thread-title {
+      font-weight: bold;
+      font-size: 1.5em;
+      margin-bottom: 10px;
+    }
+    #comments {
+      background: #fff;
+      padding: 10px;
+      border: 1px solid #ccc;
+      margin-bottom: 20px;
+    }
+    .comment {
+      border-bottom: 1px solid #ddd;
+      padding: 10px 0;
+    }
+    .comment:last-child {
+      border-bottom: none;
+    }
+    canvas {
+      border: 1px solid #ccc;
+      width: 100%;
+      height: 200px;
+      touch-action: none;
+    }
+    button {
+      padding: 6px 12px;
+      margin-top: 5px;
+    }
+    @media (max-width: 600px) {
+      canvas { height: 150px; }
+    }
+  </style>
+</head>
+<body>
+  <h1 id="thread-title">読み込み中...</h1>
+  <div id="thread-body"></div>
+
+  <h2>コメント一覧</h2>
+  <div id="comments">コメントを読み込み中...</div>
+
+  <h3>コメント投稿</h3>
+  <form id="comment-form">
+    <input type="text" id="comment-name" placeholder="名前（省略可）" /><br />
+    <textarea id="comment-body" placeholder="コメント本文" required></textarea><br />
+    <canvas id="draw-canvas"></canvas><br />
+    <button type="button" id="clear-canvas">🧽 キャンバスを消す</button>
+    <button type="submit">コメント投稿</button>
+  </form>
+
+  <script type="module">
+    import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
+
+    const supabase = createClient(
+      "https://sefxopbwwkqdyhgoozba.supabase.co",
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlZnhvcGJ3d2txZHloZ29vemJhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTIxNDE0MzYsImV4cCI6MjA2NzcxNzQzNn0.gYAz5VrU_4kAt8cX-Xsur-GhkegJJgjyd0VaaIoeHfE"
+    );
+
+    const threadId = new URLSearchParams(location.search).get("id");
+    const threadTitleEl = document.getElementById("thread-title");
+    const threadBodyEl = document.getElementById("thread-body");
+    const commentsEl = document.getElementById("comments");
+    const commentForm = document.getElementById("comment-form");
+
+    async function loadThread() {
+      const { data } = await supabase.from("threads").select("*").eq("id", threadId).single();
+      if (data) {
+        threadTitleEl.textContent = data.title;
+        threadBodyEl.innerHTML = `<p>${data.body}</p>`;
+        if (data.image_url) {
+          threadBodyEl.innerHTML += `<br><img src="${data.image_url}" style="max-width:100%">`;
+        }
+      }
+    }
+
+    async function loadComments() {
+      const { data } = await supabase.from("comments").select("*").eq("thread_id", threadId).order("created_at");
+      commentsEl.innerHTML = "";
+      if (data.length === 0) commentsEl.textContent = "コメントはまだありません";
+      for (const c of data) {
+        const div = document.createElement("div");
+        div.className = "comment";
+        div.innerHTML = `<strong>${c.name || "名無しさん"}</strong> (${new Date(c.created_at).toLocaleString()})<br>
+                         <pre>${c.body}</pre>`;
+        if (c.image_url) div.innerHTML += `<br><img src="${c.image_url}" style="max-width:100%">`;
+        div.innerHTML += `<br><button onclick="alert('通報しました')">🚨通報</button> <button onclick="alert('いいね！')">❤️いいね</button>`;
+        commentsEl.appendChild(div);
+      }
+    }
+
+    // canvas 準備
+    const canvas = document.getElementById("draw-canvas");
+    const ctx = canvas.getContext("2d");
+    let drawing = false;
+    canvas.width = canvas.offsetWidth;
+    canvas.height = canvas.offsetHeight;
+    ctx.lineWidth = 2;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "#000000";
+
+    function getPos(e) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: (e.touches ? e.touches[0].clientX : e.clientX) - rect.left,
+        y: (e.touches ? e.touches[0].clientY : e.clientY) - rect.top
+      };
+    }
+
+    canvas.addEventListener("mousedown", e => { drawing = true; const pos = getPos(e); ctx.beginPath(); ctx.moveTo(pos.x, pos.y); });
+    canvas.addEventListener("mousemove", e => { if (drawing) { const pos = getPos(e); ctx.lineTo(pos.x, pos.y); ctx.stroke(); } });
+    canvas.addEventListener("mouseup", () => drawing = false);
+    canvas.addEventListener("touchstart", e => { drawing = true; const pos = getPos(e); ctx.beginPath(); ctx.moveTo(pos.x, pos.y); });
+    canvas.addEventListener("touchmove", e => { e.preventDefault(); if (drawing) { const pos = getPos(e); ctx.lineTo(pos.x, pos.y); ctx.stroke(); } }, { passive: false });
+    canvas.addEventListener("touchend", () => drawing = false);
+
+    document.getElementById("clear-canvas").onclick = () => ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    commentForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const name = document.getElementById("comment-name").value || "名無しさん";
+      const body = document.getElementById("comment-body").value;
+
+      let image_url = null;
+      if (!ctx.getImageData(0, 0, canvas.width, canvas.height).data.every(v => v === 0)) {
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+        const filename = `comment_${Date.now()}.png`;
+        const { error: uploadErr } = await supabase.storage.from("post-images").upload(filename, blob);
+        if (!uploadErr) {
+          const { data: urlData } = supabase.storage.from("post-images").getPublicUrl(filename);
+          image_url = urlData.publicUrl;
+        }
+      }
+
+      await supabase.from("comments").insert({ thread_id: threadId, name, body, image_url });
+      commentForm.reset();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      loadComments();
+    });
+
+    loadThread();
+    loadComments();
+  </script>
+</body>
+</html>

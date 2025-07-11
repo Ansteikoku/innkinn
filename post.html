@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>６ちゃんねる - スレッド作成</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; background: #f5f5f5; max-width: 600px; margin: auto; }
+    h1 { text-align: center; }
+    input, textarea, select, button {
+      display: block;
+      width: 100%;
+      margin: 10px 0;
+      padding: 8px;
+      font-size: 1em;
+    }
+  </style>
+</head>
+<body>
+  <h1>📋 新規スレッド作成</h1>
+  <form id="post-form">
+    <select id="board-select" required>
+      <option value="">板を選択</option>
+    </select>
+    <input type="text" id="title" placeholder="タイトル" required />
+    <textarea id="body" placeholder="本文" required></textarea>
+    <input type="text" id="name" placeholder="名前（省略可）" />
+    <input type="file" id="image" accept="image/*" />
+    <button type="submit">作成する</button>
+  </form>
+
+  <script type="module">
+    import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
+
+    const supabase = createClient(
+      "https://sefxopbwwkqdyhgoozba.supabase.co",
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlZnhvcGJ3d2txZHloZ29vemJhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTIxNDE0MzYsImV4cCI6MjA2NzcxNzQzNn0.gYAz5VrU_4kAt8cX-Xsur-GhkegJJgjyd0VaaIoeHfE"
+    );
+
+    const boardSelect = document.getElementById("board-select");
+
+    async function loadBoards() {
+      const { data, error } = await supabase.from("boards").select("*").order("name");
+      if (data) {
+        data.forEach(b => {
+          const opt = document.createElement("option");
+          opt.value = b.slug;
+          opt.textContent = b.name;
+          boardSelect.appendChild(opt);
+        });
+      }
+    }
+
+    document.getElementById("post-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const board_slug = boardSelect.value;
+      const title = document.getElementById("title").value;
+      const body = document.getElementById("body").value;
+      const name = document.getElementById("name").value || "名無しさん";
+      const file = document.getElementById("image").files[0];
+
+      let image_url = null;
+      if (file) {
+        const filename = `${Date.now()}_${file.name}`;
+        const { error: uploadError } = await supabase.storage.from("post-images").upload(filename, file);
+        if (uploadError) return alert("画像アップロード失敗");
+
+        const { data: urlData } = supabase.storage.from("post-images").getPublicUrl(filename);
+        image_url = urlData.publicUrl;
+      }
+
+      const { error } = await supabase.from("threads").insert({ board_slug, title, body, name, image_url });
+      if (error) {
+        alert("投稿に失敗しました");
+      } else {
+        alert("投稿しました！");
+        location.href = "index.html?board=" + board_slug;
+      }
+    });
+
+    loadBoards();
+  </script>
+</body>
+</html>
