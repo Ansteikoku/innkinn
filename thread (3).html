@@ -1,0 +1,110 @@
+
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>スレッド詳細</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: sans-serif; padding: 10px; background: #f4f4f4; max-width: 800px; margin: auto; }
+    .comment { background: #fff; padding: 10px; margin: 10px 0; border: 1px solid #ccc; }
+    textarea, input, button { width: 100%; margin: 5px 0; padding: 8px; }
+    canvas { border: 1px solid #ccc; display: block; margin-top: 5px; }
+  </style>
+</head>
+<body>
+  <h1 id="title">読み込み中...</h1>
+  <div id="body"></div>
+  <img id="image" style="max-width:100%;" />
+  <img id="draw" style="max-width:100%;" />
+
+  <h2>コメント</h2>
+  <div id="comments">読み込み中...</div>
+
+  <form id="comment-form">
+    <input type="text" id="name" placeholder="名前（任意）" />
+    <textarea id="comment-body" required placeholder="コメント本文"></textarea>
+    <input type="file" id="comment-image" accept="image/*" />
+    <canvas id="comment-canvas" width="300" height="200"></canvas>
+    <button type="button" onclick="clearCommentCanvas()">クリア</button>
+    <button type="submit">送信</button>
+  </form>
+
+  <script type="module">
+    import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
+    const supabase = createClient("https://sefxopbwwkqdyhgoozba.supabase.co", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlZnhvcGJ3d2txZHloZ29vemJhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTIxNDE0MzYsImV4cCI6MjA2NzcxNzQzNn0.gYAz5VrU_4kAt8cX-Xsur-GhkegJJgjyd0VaaIoeHfE");
+
+    const threadId = new URLSearchParams(location.search).get("id");
+
+    const canvas = document.getElementById("comment-canvas");
+    const ctx = canvas.getContext("2d");
+    let drawing = false;
+    canvas.addEventListener("mousedown", () => drawing = true);
+    canvas.addEventListener("mouseup", () => drawing = false);
+    canvas.addEventListener("mousemove", (e) => {
+      if (!drawing) return;
+      const rect = canvas.getBoundingClientRect();
+      ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
+      ctx.stroke();
+    });
+    function clearCommentCanvas() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+    window.clearCommentCanvas = clearCommentCanvas;
+
+    async function loadThread() {
+      const { data, error } = await supabase.from("threads").select("*").eq("id", threadId).single();
+      if (data) {
+        document.getElementById("title").textContent = data.title;
+        document.getElementById("body").textContent = data.body;
+        if (data.image_url) document.getElementById("image").src = data.image_url;
+        if (data.draw_url) document.getElementById("draw").src = data.draw_url;
+      }
+    }
+
+    async function loadComments() {
+      const { data, error } = await supabase.from("comments").select("*").eq("thread_id", threadId).order("created_at");
+      const container = document.getElementById("comments");
+      container.innerHTML = "";
+      data.forEach(c => {
+        const div = document.createElement("div");
+        div.className = "comment";
+        div.innerHTML = `<strong>${c.name || "名無しさん"}</strong><br>${c.body}`;
+        if (c.image_url) div.innerHTML += `<br><img src="${c.image_url}" style="max-width:100%;">`;
+        if (c.draw_url) div.innerHTML += `<br><img src="${c.draw_url}" style="max-width:100%;">`;
+        container.appendChild(div);
+      });
+    }
+
+    document.getElementById("comment-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const name = document.getElementById("name").value;
+      const body = document.getElementById("comment-body").value;
+      const file = document.getElementById("comment-image").files[0];
+      let imageUrl = null;
+
+      if (file) {
+        const fileName = Date.now() + "_" + file.name;
+        const { error: uploadError } = await supabase.storage.from("post-images").upload(fileName, file);
+        if (!uploadError) {
+          const { data: urlData } = supabase.storage.from("post-images").getPublicUrl(fileName);
+          imageUrl = urlData.publicUrl;
+        }
+      }
+
+      const drawUrl = canvas.toDataURL("image/png");
+      const { error } = await supabase.from("comments").insert({
+        thread_id: threadId, name, body, image_url: imageUrl, draw_url: drawUrl
+      });
+      if (!error) {
+        e.target.reset();
+        clearCommentCanvas();
+        loadComments();
+      }
+    });
+
+    loadThread();
+    loadComments();
+  </script>
+</body>
+</html>
