@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>６ちゃんねる - ホーム</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 20px;
+      background: #f9f9f9;
+      max-width: 800px;
+      margin: auto;
+    }
+    h1, h2 { text-align: center; }
+    .section { margin: 30px 0; }
+    input, button {
+      padding: 8px;
+      margin: 5px;
+      font-size: 1em;
+    }
+    #search-results div, #popular-threads div {
+      margin: 5px 0;
+    }
+    a { text-decoration: none; color: #0366d6; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <h1>６ちゃんねるへようこそ</h1>
+  <p style="text-align:center;">自由にスレッドを立てて、画像・お絵かき・コメントで交流できます。</p>
+
+  <!-- 板名ジャンプ -->
+  <div class="section">
+    <h2>📛 板名で板に移動</h2>
+    <input list="board-names" id="board-name-input" placeholder="板名（例: なんでも実況J）" />
+    <datalist id="board-names"></datalist>
+    <button onclick="goToBoardByName()">移動</button>
+  </div>
+
+  <!-- スレッド検索 -->
+  <div class="section">
+    <h2>🔍 スレッド検索（リアルタイム & ボタン）</h2>
+    <input type="text" id="thread-search" placeholder="キーワードを入力してください" />
+    <button onclick="performThreadSearch()">検索</button>
+    <div id="search-results"></div>
+  </div>
+
+  <!-- 人気スレッド -->
+  <div class="section">
+    <h2>🔥 人気スレッドランキング</h2>
+    <div id="popular-threads">読み込み中...</div>
+  </div>
+
+  <!-- 新着スレッド -->
+  <div class="section">
+    <h2>🆕 新着スレッド</h2>
+    <div id="latest-threads">読み込み中...</div>
+  </div>
+
+  <!-- すべての板 -->
+  <div class="section">
+    <h2>📚 すべての板</h2>
+    <div id="all-boards">読み込み中...</div>
+  </div>
+
+  <script type="module">
+    import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
+
+    const supabase = createClient(
+      "https://sefxopbwwkqdyhgoozba.supabase.co",
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlZnhvcGJ3d2txZHloZ29vemJhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTIxNDE0MzYsImV4cCI6MjA2NzcxNzQzNn0.gYAz5VrU_4kAt8cX-Xsur-GhkegJJgjyd0VaaIoeHfE"
+    );
+
+    let allBoards = [];
+
+    function goToBoardByName() {
+      const name = document.getElementById("board-name-input").value.trim();
+      const match = allBoards.find(b => b.name === name);
+      if (match) {
+        location.href = `index.html?board=${match.slug}`;
+      } else {
+        alert("該当する板が見つかりません");
+      }
+    }
+
+    async function loadBoardNames() {
+      const { data, error } = await supabase.from("boards").select("*");
+      if (data) {
+        allBoards = data;
+        const datalist = document.getElementById("board-names");
+        datalist.innerHTML = "";
+        data.forEach(b => {
+          const opt = document.createElement("option");
+          opt.value = b.name;
+          datalist.appendChild(opt);
+        });
+      }
+    }
+
+    document.getElementById("thread-search").addEventListener("input", performThreadSearch);
+
+    async function performThreadSearch() {
+      const keyword = document.getElementById("thread-search").value.trim();
+      const resultBox = document.getElementById("search-results");
+      if (!keyword) return (resultBox.innerHTML = "");
+
+      const { data, error } = await supabase
+        .from("threads")
+        .select("id, title, body")
+        .or(`title.ilike.%${keyword}%,body.ilike.%${keyword}%`)
+        .order("created_at", { ascending: false })
+        .limit(20);
+
+      if (error || !data) {
+        resultBox.innerHTML = "<p>検索に失敗しました</p>";
+        return;
+      }
+
+      if (data.length === 1) {
+        location.href = `thread.html?id=${data[0].id}`;
+      } else {
+        resultBox.innerHTML = data.length
+          ? data.map(t => `<div><a href="thread.html?id=${t.id}">${t.title}</a></div>`).join("")
+          : "<p>該当なし</p>";
+      }
+    }
+
+    async function loadPopularThreads() {
+      const { data, error } = await supabase
+        .from("threads")
+        .select("*")
+        .order("view_count", { ascending: false })
+        .limit(5);
+
+      const container = document.getElementById("popular-threads");
+      if (!data || error) return container.textContent = "読み込み失敗";
+      container.innerHTML = "";
+      data.forEach(t => {
+        const el = document.createElement("div");
+        el.innerHTML = `<a href="thread.html?id=${t.id}">${t.title}</a>（${t.view_count || 0}ビュー）`;
+        container.appendChild(el);
+      });
+    }
+
+    async function loadLatestThreads() {
+      const { data, error } = await supabase
+        .from("threads")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(5);
+
+      const container = document.getElementById("latest-threads");
+      if (!data || error) return container.textContent = "読み込み失敗";
+      container.innerHTML = "";
+      data.forEach(t => {
+        const el = document.createElement("div");
+        el.innerHTML = `<a href="thread.html?id=${t.id}">${t.title}</a>`;
+        container.appendChild(el);
+      });
+    }
+
+    async function loadAllBoards() {
+      const { data, error } = await supabase.from("boards").select("*").order("name");
+      const container = document.getElementById("all-boards");
+      if (!data || error) return container.textContent = "読み込み失敗";
+      container.innerHTML = "";
+      data.forEach(b => {
+        const el = document.createElement("div");
+        el.innerHTML = `<a href="index.html?board=${b.slug}">${b.name}</a>`;
+        container.appendChild(el);
+      });
+    }
+
+    loadBoardNames();
+    loadPopularThreads();
+    loadLatestThreads();
+    loadAllBoards();
+  </script>
+</body>
+</html>
